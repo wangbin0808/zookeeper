@@ -82,7 +82,9 @@ public final class StaticHostProvider implements HostProvider {
      *             if serverAddresses is empty or resolves to an empty list
      */
     public StaticHostProvider(Collection<InetSocketAddress> serverAddresses) {
+        // init的第三个参数是创建了一个地址处理器
         init(serverAddresses, System.currentTimeMillis() ^ this.hashCode(), new Resolver() {
+            // 根据指定的主机名，获取到所有其对应的ip地址
             @Override
             public InetAddress[] getAllByName(String name) throws UnknownHostException {
                 return InetAddress.getAllByName(name);
@@ -130,6 +132,7 @@ public final class StaticHostProvider implements HostProvider {
         if (serverAddresses.isEmpty()) {
             throw new IllegalArgumentException("A HostProvider may not be empty!");
         }
+        // 对当前地址第一次打散
         this.serverAddresses = shuffle(serverAddresses);
         currentIndex = -1;
         lastIndex = -1;
@@ -138,11 +141,14 @@ public final class StaticHostProvider implements HostProvider {
     private InetSocketAddress resolve(InetSocketAddress address) {
         try {
             String curHostString = address.getHostString();
+            // 根据hostname，获取所对应的所有ip
             List<InetAddress> resolvedAddresses = new ArrayList<>(Arrays.asList(this.resolver.getAllByName(curHostString)));
             if (resolvedAddresses.isEmpty()) {
                 return address;
             }
+            // 对所有ip地址进行shuffle，这是第二次shuffle
             Collections.shuffle(resolvedAddresses);
+            // 获取shuffle过后，获取第一个地址
             return new InetSocketAddress(resolvedAddresses.get(0), address.getPort());
         } catch (UnknownHostException e) {
             LOG.error("Unable to resolve address: {}", address.toString(), e);
@@ -153,6 +159,7 @@ public final class StaticHostProvider implements HostProvider {
     private List<InetSocketAddress> shuffle(Collection<InetSocketAddress> serverAddresses) {
         List<InetSocketAddress> tmpList = new ArrayList<>(serverAddresses.size());
         tmpList.addAll(serverAddresses);
+        // 进行打散
         Collections.shuffle(tmpList, sourceOfRandomness);
         return tmpList;
     }
@@ -317,6 +324,13 @@ public final class StaticHostProvider implements HostProvider {
         // and either the probability tells us to connect to one of the new
         // servers or if we already
         // tried all the old servers
+        // 尝试过程原理
+        // oldServers 是存放原来server的集合
+        // newServers 是存放扩容server的集合
+        // 1、若当前已经将所有老集合中的server全部尝试了一遍，都没有连接成功。此时若添加进了扩容server的新集合，
+        // 那么就从新集合中逐个尝试
+        // 2、若当前老集合中的server还没有全部尝试完毕，则此时有扩容了新集合，也会先继续从老集合中进行尝试
+        // 3、若新集合中都尝试了一遍，还没有连接成功，则会在从老集合中进行逐个尝试
         if (((currentIndexNew + 1) < newServers.size()) && (takeNew || (currentIndexOld + 1) >= oldServers.size())) {
             ++currentIndexNew;
             return newServers.get(currentIndexNew);
@@ -336,21 +350,30 @@ public final class StaticHostProvider implements HostProvider {
         InetSocketAddress addr;
 
         synchronized (this) {
-            if (reconfigMode) {
+//            扩容的时候会吧这个reconfigMode设置成true
+            if (reconfigMode) {// 动态扩容，涉及新老机器 3.4版本及以前没有动态扩容的机制，
+                // 获取server地址
                 addr = nextHostInReconfigMode();
                 if (addr != null) {
+                    //
                     currentIndex = serverAddresses.indexOf(addr);
+                    // 对获取到的地址进行处理
+                    // 获取到hostname对应的所有ip，进行第二次打散shuffle
+                    // 并返回shuffle过后，第一个ip构成的地址
+
                     return resolve(addr);
                 }
                 //tried all servers and couldn't connect
                 reconfigMode = false;
                 needToSleep = (spinDelay > 0);
             }
+            // 处理 reconfigMode 为false的请求，即没有扩容的情况｜扩容已经完成，即新的配置已经成功加载，即变成了一个普通的zk集合了
             ++currentIndex;
             if (currentIndex == serverAddresses.size()) {
                 currentIndex = 0;
             }
             addr = serverAddresses.get(currentIndex);
+            // currentIndex == lastIndex 这种情况只有单机
             needToSleep = needToSleep || (currentIndex == lastIndex && spinDelay > 0);
             if (lastIndex == -1) {
                 // We don't want to sleep on the first ever connect attempt.

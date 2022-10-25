@@ -440,7 +440,9 @@ public class ClientCnxn {
     }
 
     public void start() {
+        // 开启连接请求发送线程
         sendThread.start();
+        // 开启事件处理的线程
         eventThread.start();
     }
 
@@ -1138,11 +1140,14 @@ public class ClientCnxn {
                     LOG.warn("Unexpected exception", e);
                 }
             }
+            // 修改server的状态
             changeZkState(States.CONNECTING);
 
             String hostPort = addr.getHostString() + ":" + addr.getPort();
             MDC.put("myid", hostPort);
+            // 设置连接名称
             setName(getName().replaceAll("\\(.*\\)", "(" + hostPort + ")"));
+            // 判断一下是不是开启了sasl的客户端验证机制（C/S模式的验证机制）
             if (clientConfig.isSaslClientEnabled()) {
                 try {
                     if (zooKeeperSaslClient != null) {
@@ -1164,6 +1169,7 @@ public class ClientCnxn {
             }
             logStartConnect(addr);
 
+            // 连接
             clientCnxnSocket.connect(addr);
         }
 
@@ -1183,8 +1189,10 @@ public class ClientCnxn {
             long lastPingRwServer = Time.currentElapsedTime();
             final int MAX_SEND_PING_INTERVAL = 10000; //10 seconds
             InetSocketAddress serverAddress = null;
+            // 只要连接没有关闭，也没有验证失败，就一直循环
             while (state.isAlive()) {
                 try {
+                    // 处理没有连接上的情况
                     if (!clientCnxnSocket.isConnected()) {
                         // don't re-establish connection if we are closing
                         if (closing) {
@@ -1194,12 +1202,15 @@ public class ClientCnxn {
                             serverAddress = rwServerAddress;
                             rwServerAddress = null;
                         } else {
+                            // 获取连接的server地址
                             serverAddress = hostProvider.next(1000);
                         }
                         onConnecting(serverAddress);
+                        // 开始连接
                         startConnect(serverAddress);
                         // Update now to start the connection timer right after we make a connection attempt
                         clientCnxnSocket.updateNow();
+                        // 更新交互（连接请求/读写请求）时间戳
                         clientCnxnSocket.updateLastSendAndHeard();
                     }
 
@@ -1236,12 +1247,17 @@ public class ClientCnxn {
                                 }
                             }
                         }
+                        // 读超时
+                        // 获取已经有多久没有收到交互响应了
                         to = readTimeout - clientCnxnSocket.getIdleRecv();
                     } else {
+                        // 连接超时
+                        // 获取已经有多久没有收到连接请求的响应了
                         to = connectTimeout - clientCnxnSocket.getIdleRecv();
                     }
 
                     if (to <= 0) {
+                        // 处理回话超时的情况
                         String warnInfo = String.format(
                             "Client session timed out, have not heard from server in %dms for session id 0x%s",
                             clientCnxnSocket.getIdleRecv(),

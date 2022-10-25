@@ -85,6 +85,7 @@ public final class ConnectStringParser {
                     host = host.substring(0, pidx);
                 }
             }
+            // 将当前遍历的字符串解析出的host与port构建为一个地址，写入到缓存集合中
             serverAddresses.add(InetSocketAddress.createUnresolved(host, port));
         }
     }

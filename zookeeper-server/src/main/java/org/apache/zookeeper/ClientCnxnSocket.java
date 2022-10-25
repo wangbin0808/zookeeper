@@ -83,10 +83,16 @@ abstract class ClientCnxnSocket {
     }
 
     void updateNow() {
+        // 获取到当前时间（相对于当前jvm高分辨率时间源的时间）
+        // 其实是个毫秒值
         now = Time.currentElapsedTime();
     }
 
     int getIdleRecv() {
+        // 若当前是连接成功状态，则lastHeard表示上次续约时间点
+        // 若当前是连接失败状态，则lastHeard表示上次发出的连接请求的时间点
+        // 即，lastHeard表示上次交互的时间点
+        // 它就表示距离上次交互已经多久没有交互了
         return (int) (now - lastHeard);
     }
 
@@ -111,7 +117,10 @@ abstract class ClientCnxnSocket {
     }
 
     void updateLastSendAndHeard() {
+        // 若当前为连接请求，，则记录下当前连接的时间点
         this.lastSend = now;
+        // 若当前为读写请求，则记录下本次续约的时间点
+        // 因为读写请求、心跳都是续约的一种形式
         this.lastHeard = now;
     }
 
