@@ -81,10 +81,15 @@ import org.slf4j.LoggerFactory;
  * maintains one connection for every pair of servers. The tricky part is to
  * guarantee that there is exactly one connection for every pair of servers that
  * are operating correctly and that can communicate over the network.
+ * 这个类使用TCP实现了一个用于leader选举的连接管理器。
+ * 它为每一对服务器维护者一个连接。
+ * 棘手的部分在于确定（为每对服务器正确地操作并且可以与整个网络进行网络通信的）连接恰有一个。
  *
  * If two servers try to start a connection concurrently, then the connection
  * manager uses a very simple tie-breaking mechanism to decide which connection
  * to drop based on the IP addressed of the two parties.
+ * 如果两个服务器试图同时启动一个连接，则连接管理器使用
+ * 非常简单的中断连接机制来决定那个中断，基于双方的IP地址
  *
  * For every peer, the manager maintains a queue of messages to send. If the
  * connection to any particular peer drops, then the sender thread puts the
@@ -93,6 +98,16 @@ import org.slf4j.LoggerFactory;
  * message to the tail of the queue, thus changing the order of messages.
  * Although this is not a problem for the leader election, it could be a problem
  * when consolidating peer communication. This is to be verified, though.
+ * 对于每个对等体，管理器维护着一个消息发送队列，如果连接到任何特定的server中断，那么发送者线程将消息放回到这个列表中，作为这个实现，当前使用一个队列来实现维护发送给另外一方的消息
+ * ，因此我们将消息添加到队列的尾部，从而更改了消息的顺序。虽然对于leader选举来说这不是问题，但对于加强对等消息可能是个问题。不过，这一点有待验证
+ *
+ * 每一个server都拥有一个QuorumCnxManager，而QuorumCnxManager对象拥有一个消息发送map，
+ * 该map都key为其它server都id，value为一个队列。这个队列中存放的是当前server向这个server
+ * 发送失败的消息。这样的话，对于这个map会有这样的三种情况：
+ * 1、所有队列均为空，说明当前server发送的消息全部成功。
+ * 2、所有队列均不为空，说明当前server发送给所有其它server的消息全部失败，即当前server与集合失联
+ * 3、若有一个队列为空，说明当前server给这个server发送的消息全部成功，即当前server与集合没有失联
+ *
  *
  */
 
@@ -799,14 +814,19 @@ public class QuorumCnxManager {
      * Check if all queues are empty, indicating that all messages have been delivered.
      */
     boolean haveDelivered() {
+        // queueSendMap 的key
+        // 该map都key为其它server的id，value为一个队列。这个队列中存放的是当前server向这个server发送失败的消息
         for (BlockingQueue<ByteBuffer> queue : queueSendMap.values()) {
             final int queueSize = queue.size();
             LOG.debug("Queue size: {}", queueSize);
+            // 若queueSize==0，说明当前server向某个其它server发送的消息全部成功了，
+            // 即当前server与整个集群没有失联，其消息交付是成功的
             if (queueSize == 0) {
                 return true;
             }
         }
 
+        // 代码走到这里，说明所有queue的size都不是0，即当前server向所有其它server发送的消息全部失败，也就是说，当前server与整个集群失联了
         return false;
     }
 

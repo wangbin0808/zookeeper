@@ -38,12 +38,17 @@ import org.slf4j.LoggerFactory;
  * construction, zookeeper servers are split into disjoint groups, and
  * each server has a weight. We obtain a quorum if we get more than half
  * of the total weight of a group for a majority of groups.
+ * 这个类实现了一个层次量化的验证器。通过这种结构，zk服务器被分为不相交的组，并且每个服务器都有一个权重。
+ * 对于大多数group，如果我们获得的权重超过这个group总权重的一半，我们就获得大多数（过半）
  *
  * The configuration of quorums uses two parameters: group and weight.
  * Groups are sets of ZooKeeper servers, and we set a group by passing
  * a colon-separated list of server ids. It is also necessary to assign
  * weights to server. Here is an example of a configuration that creates
  * three groups and assigns a weight of 1 to each server:
+ * quorums的配置有两个参数：组和重量。组是zk服务器的集合
+ * 我们这设置一个组，通过传递一个以冒号分隔的server id列表。它还需要为server分配权重
+ * 以下是一个配置示例，该配置创建了三个group并为每个server分配权重为1
  *
  *  group.1=1:2:3
  *  group.2=4:5:6
@@ -59,23 +64,35 @@ import org.slf4j.LoggerFactory;
  *  weight.8=1
  *  weight.9=1
  *
+ * 注意，默认情况下，每个server就是一个group，groupId就是serverId，
+ * 每个participant的默认就是1，每个observer的权重默认为0
  * Note that it is still necessary to define peers using the server keyword.
+ * 请注意，仍然需要使用server关键字定义对等点
  */
 
 public class QuorumHierarchical implements QuorumVerifier {
 
     private static final Logger LOG = LoggerFactory.getLogger(QuorumHierarchical.class);
 
+    // key是为serverId，v是Weight
     private HashMap<Long, Long> serverWeight = new HashMap<Long, Long>();
+    // key是为serverId，v是该server所属的groupId
     private HashMap<Long, Long> serverGroup = new HashMap<Long, Long>();
+    // key是为groupId，v是该group所包含的所有server的权重之和
     private HashMap<Long, Long> groupWeight = new HashMap<Long, Long>();
 
+    // 集群中包含组的数量
+    // 若每个server是一个组，那么该变量就变为了server的数量
     private int numGroups = 0;
 
+    // 存放当前版本的动态配置中所有的server k是serverId，v是server主机
     private Map<Long, QuorumServer> allMembers = new HashMap<Long, QuorumServer>();
+    // 存放当前版本的动态配置中所有的participant k是serverId，v是server主机
     private Map<Long, QuorumServer> participatingMembers = new HashMap<Long, QuorumServer>();
+    // 存放当前版本的动态配置中所有的observer k是serverId，v是server主机
     private Map<Long, QuorumServer> observingMembers = new HashMap<Long, QuorumServer>();
 
+    // 当前动态配置的版本号
     private long version = 0;
 
     public int hashCode() {
@@ -323,8 +340,10 @@ public class QuorumHierarchical implements QuorumVerifier {
 
     /**
      * Verifies if a given set is a quorum.
+     * 验证给定的set是否是大多数
      */
     public boolean containsQuorum(Set<Long> set) {
+        // 临时变量集合变量 key为groupId，v是当前set中该groupId的所有server的权重之和
         HashMap<Long, Long> expansion = new HashMap<Long, Long>();
 
         /*
@@ -336,10 +355,12 @@ public class QuorumHierarchical implements QuorumVerifier {
         }
 
         for (long sid : set) {
+            // 获取当前遍历的server所属的groupId
             Long gid = serverGroup.get(sid);
             if (gid == null) {
                 continue;
             }
+            // 若当前expansion没有gid，那么当遍历的这个server就是这个gid的第一个server，就将当前遍历server的权重作为该group的权重之和写入expansion
             if (!expansion.containsKey(gid)) {
                 expansion.put(gid, serverWeight.get(sid));
             } else {
@@ -350,17 +371,23 @@ public class QuorumHierarchical implements QuorumVerifier {
 
         /*
          * Check if all groups have majority
+         * 检测是不是大多数组
          */
         int majGroupCounter = 0;
         for (Entry<Long, Long> entry : expansion.entrySet()) {
+            // 获取当前的groupId
             Long gid = entry.getKey();
             LOG.debug("Group info: {}, {}, {}", entry.getValue(), gid, groupWeight.get(gid));
+            // entry.getValue()是当前遍历group的totalWeight
+            // 判断当前遍历group的totalWeight是否大于当前组的总权重之和的一半
+            // 若大于，则计数器加一
             if (entry.getValue() > (groupWeight.get(gid) / 2)) {
                 majGroupCounter++;
             }
         }
 
         LOG.debug("Majority group counter: {}, {}", majGroupCounter, numGroups);
+        // 若大多数组都满足前面的条件，则返回true，表示当前版本的QuorumVerifier对的ackset的判断是过半的
         if ((majGroupCounter > (numGroups / 2))) {
             LOG.debug("Positive set size: {}", set.size());
             return true;

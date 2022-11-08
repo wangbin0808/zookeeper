@@ -24,15 +24,20 @@ import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 
 public class SyncedLearnerTracker {
 
+    //
     protected ArrayList<QuorumVerifierAcksetPair> qvAcksetPairs = new ArrayList<QuorumVerifierAcksetPair>();
 
     public void addQuorumVerifier(QuorumVerifier qv) {
+        // 将指定的验证器构建为一个pair后添加到列表
         qvAcksetPairs.add(new QuorumVerifierAcksetPair(qv, new HashSet<Long>(qv.getVotingMembers().size())));
     }
 
+    // 将sid添加到每个QuorumVerifier对应的ackset集合
     public boolean addAck(Long sid) {
         boolean change = false;
+        // 遍历每个QuorumVerifier
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+            // 若当前QuorumVerifier包含d particitant中包含当前的server，则将这个serverIdx刻入到这个QuorumVerifier对应的ackset
             if (qvAckset.getQuorumVerifier().getVotingMembers().containsKey(sid)) {
                 qvAckset.getAckset().add(sid);
                 change = true;
@@ -41,21 +46,28 @@ public class SyncedLearnerTracker {
         return change;
     }
 
+    // 判断所有QuorumVerifier对应的ackset中是否包含指定的sid
     public boolean hasSid(long sid) {
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
             if (!qvAckset.getQuorumVerifier().getVotingMembers().containsKey(sid)) {
+                // 只要有一个不包含就返回false
                 return false;
             }
         }
+        // 只有所有的ackset都包含该sid，才返回true
         return true;
     }
 
+    // 验证当前leader选举是否可以结束了
     public boolean hasAllQuorums() {
-        for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+        // 遍历所有的QuorumVerifier，只有当所有QuorumVerifier中当ackset都判断过半了，才能结束本轮leader选举。只要有一个QuorumVerifier中的ackset没有过半，就不能结束选举
+        for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {// 最多两个版本，当前版本和最新版本
             if (!qvAckset.getQuorumVerifier().containsQuorum(qvAckset.getAckset())) {
+                // 只要有一个QuorumVerifier中的ackset没有过半，就不能结束选举
                 return false;
             }
         }
+        // 选举可以结束了
         return true;
     }
 
@@ -69,9 +81,12 @@ public class SyncedLearnerTracker {
         return sb.substring(0, sb.length() - 1);
     }
 
+    // 可以将其简单理解为一个k-v对
     public static class QuorumVerifierAcksetPair {
 
+        // 基于ackset验证支持是否过半
         private final QuorumVerifier qv;
+        // 存放的是当前server接收到的外来通知的来源serverId
         private final HashSet<Long> ackset;
 
         public QuorumVerifierAcksetPair(QuorumVerifier qv, HashSet<Long> ackset) {

@@ -34,23 +34,33 @@ import org.apache.zookeeper.common.Time;
  */
 public class ExpiryQueue<E> {
 
+    //  // elemMap集合的key为session，v为该session的过期时间，即该session当前所在的会话桶id
+    // 会话
     private final ConcurrentHashMap<E, Long> elemMap = new ConcurrentHashMap<E, Long>();
     /**
      * The maximum number of buckets is equal to max timeout/expirationInterval,
      * so the expirationInterval should not be too small compared to the
      * max timeout that this expiry queue needs to maintain.
      */
+    // 会话桶集合
     private final ConcurrentHashMap<Long, Set<E>> expiryMap = new ConcurrentHashMap<Long, Set<E>>();
 
+    // 下一次清理的时间点
     private final AtomicLong nextExpirationTime = new AtomicLong();
     private final int expirationInterval;
 
     public ExpiryQueue(int expirationInterval) {
+        // 会话桶的大小，默认值是2000ms
         this.expirationInterval = expirationInterval;
+        // roundToNextInterval(Time.currentElapsedTime()) 计算当前时间的会话桶
+        // 每个会话桶都有一个标识id，即其所包含的时间范围的最大边界时间点
+        // nextExpirationTime 用于记录下次要进行过期会话清理的时间点
         nextExpirationTime.set(roundToNextInterval(Time.currentElapsedTime()));
     }
 
+    // 计算指定时间所在的会话桶
     private long roundToNextInterval(long time) {
+        // 利用整形除结果仍为整型来计算会话桶
         return (time / expirationInterval + 1) * expirationInterval;
     }
 
@@ -81,39 +91,60 @@ public class ExpiryQueue<E> {
      * @return time at which the element is now set to expire if
      *                 changed, or null if unchanged
      */
+    //1、zk server启动时会将磁盘中的session恢复到内存，也会调用该方法
+    //2、当前client与server有交互时（连接请求/读写操作/心跳），该方法就会被调用
+    // 该方法在做的是会话桶换桶操作
     public Long update(E elem, int timeout) {
+        // elemMap集合的key为session，v为该session的过期时间，即该session当前所在的会话桶id
         Long prevExpiryTime = elemMap.get(elem);
         long now = Time.currentElapsedTime();
+        // 计算本次交互应该将会话放入到那个会话桶
         Long newExpiryTime = roundToNextInterval(now + timeout);
 
+        // 若之前所在会话桶id与本次交互计算的会话桶id相同，则无需换桶
         if (newExpiryTime.equals(prevExpiryTime)) {
             // No change, so nothing to update
             return null;
         }
+        // 代码能走到这里，说明需要换桶了
+        // 换桶由两部操作完成，将会话放入到新桶，将会话从老桶中删除
 
         // First add the elem to the new expiry time bucket in expiryMap.
+        // expiryMap是会话桶集合，其value为会话桶（set集合），key为该会话桶id（其表示的时间范围的最大边界值）
+
+        // 从会话桶集合中获取当前的会话桶，若为null，则创建一个新的会话桶
         Set<E> set = expiryMap.get(newExpiryTime);
         if (set == null) {
             // Construct a ConcurrentHashSet using a ConcurrentHashMap
+            // 创建会话桶
             set = Collections.newSetFromMap(new ConcurrentHashMap<E, Boolean>());
             // Put the new set in the map, but only if another thread
             // hasn't beaten us to it
+            // 将新建的会话桶放入到会话桶集合
             Set<E> existingSet = expiryMap.putIfAbsent(newExpiryTime, set);
             if (existingSet != null) {
                 set = existingSet;
             }
         }
+        // 将会话放进会话桶
         set.add(elem);
 
         // Map the elem to the new expiry time. If a different previous
         // mapping was present, clean up the previous expiry bucket.
+        // 将会话与会话桶id的对应关系放入到eleMap，并获取到该会话之前所在的会话桶id
         prevExpiryTime = elemMap.put(elem, newExpiryTime);
+        // 若当前会话桶id与之间会话桶id不相同，说明已经换过桶了
+        // 而前面已经将会话放到了新的会话桶，所以这里要将会话从老桶中清除
         if (prevExpiryTime != null && !newExpiryTime.equals(prevExpiryTime)) {
+            // 获取到之间的会话桶
             Set<E> prevSet = expiryMap.get(prevExpiryTime);
+            // 将会话从老会话桶中清除
             if (prevSet != null) {
                 prevSet.remove(elem);
             }
         }
+        // 返回当前交互引发的会话所在的会话桶id
+        // 即当前会话的真正过期的时间点
         return newExpiryTime;
     }
 
@@ -122,7 +153,10 @@ public class ExpiryQueue<E> {
      */
     public long getWaitTime() {
         long now = Time.currentElapsedTime();
+//        nextExpirationTime 用于记录下次要进行过期会话清理的时间点
+        // 获取本次要进行过期请求的时间点
         long expirationTime = nextExpirationTime.get();
+        // 计算当前时间距离清理时间点的差值
         return now < expirationTime ? (expirationTime - now) : 0L;
     }
 
@@ -137,13 +171,16 @@ public class ExpiryQueue<E> {
     public Set<E> poll() {
         long now = Time.currentElapsedTime();
         long expirationTime = nextExpirationTime.get();
+        // 当前时间小于清理时间，说明还没有到清理时间，直接返回空集合
         if (now < expirationTime) {
             return Collections.emptySet();
         }
 
         Set<E> set = null;
+        // 计算下一个清理的时间点
         long newExpirationTime = expirationTime + expirationInterval;
         if (nextExpirationTime.compareAndSet(expirationTime, newExpirationTime)) {
+            // 将当前清理时间作为会话桶id的会话桶从会话桶中remove掉
             set = expiryMap.remove(expirationTime);
         }
         if (set == null) {

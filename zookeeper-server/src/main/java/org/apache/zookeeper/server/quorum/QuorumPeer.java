@@ -97,9 +97,15 @@ import org.slf4j.LoggerFactory;
  * <li>Leader - the server will process requests and forward them to followers.
  * A majority of followers must log the request before it can be accepted.
  * </ol>
+ * 这个类管理者"法定人数投票"协议。
+ *  这个服务有三个状态：
+ * 1、leader election：（处于该状态的）每一个服务器将选举一个leader（最初推荐自己作为leader），这个状态即LOOKING状态
+ * 2、Follower：（处于该状态的）服务器与leader同步，并复制所有的事务（注意 这里的事务指的是最终的提议proposal，不要忘记txid中的tx即为事务）
+ * 3、leader：（处于该状态的）服务器处理请求，并将这些请求转发给其它follower。大多数follower在该写请求被批准之前都必须记录下该请求
  *
  * This class will setup a datagram socket that will always respond with its
  * view of the current leader. The response will take the form of:
+ * 这个类将设置一个数据报套接字，这个数据报套接字将总是使用它的试图（格式）来响应当前的leader。响应将采用的格式为：
  *
  * <pre>
  * int xid;
@@ -1643,7 +1649,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
     public synchronized Set<Long> getCurrentAndNextConfigVoters() {
+        // 使用当前版本的QuorumVerifier中所有的participant，创建一个set集合
         Set<Long> voterIds = new HashSet<Long>(getQuorumVerifier().getVotingMembers().keySet());
+        // 若当前有最新版本的QuorumVerifier，则将其participant更新到voterIds中
         if (getLastSeenQuorumVerifier() != null) {
             voterIds.addAll(getLastSeenQuorumVerifier().getVotingMembers().keySet());
         }

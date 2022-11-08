@@ -58,6 +58,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         SessionImpl(long sessionId, int timeout) {
             this.sessionId = sessionId;
             this.timeout = timeout;
+            // 会话关闭标识为false
             isClosing = false;
         }
 
@@ -110,10 +111,13 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     public SessionTrackerImpl(SessionExpirer expirer, ConcurrentMap<Long, Integer> sessionsWithTimeout, int tickTime, long serverId, ZooKeeperServerListener listener) {
         super("SessionTracker", listener);
         this.expirer = expirer;
+        // 创建并初始化会话过期队列
         this.sessionExpiryQueue = new ExpiryQueue<SessionImpl>(tickTime);
         this.sessionsWithTimeout = sessionsWithTimeout;
         this.nextSessionId.set(initializeNextSessionId(serverId));
+        // 遍历磁盘中存放的session
         for (Entry<Long, Integer> e : sessionsWithTimeout.entrySet()) {
+            // sessionsWithTimeout是一个map，key为sessionId，value为该会话的timeout
             trackSession(e.getKey(), e.getValue());
         }
 
@@ -154,19 +158,28 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         return sw.toString();
     }
 
+    // 该run方法就是用于对过期会话及会话桶进行清理的
+    // 而这个清理工作是定时进行的，但这个定时功能不是通过定时器完成的，而不是定时器
     @Override
     public void run() {
         try {
+            // 只要当前sessionTracker没有关系，该while永远不会停止
+            // 其没有break
             while (running) {
+                // 等待的时间 计算当前时间距离清理时间点的差值
                 long waitTime = sessionExpiryQueue.getWaitTime();
-                if (waitTime > 0) {
+                if (waitTime > 0) {// 清理时间还没有到
                     Thread.sleep(waitTime);
                     continue;
                 }
 
+                // sessionExpiryQueue.poll()用于清理当前过期的会话桶
+
                 for (SessionImpl s : sessionExpiryQueue.poll()) {
                     ServerMetrics.getMetrics().STALE_SESSIONS_EXPIRED.add(1);
+                    // 修改状态
                     setSessionClosing(s.sessionId);
+                    // 关闭当前会话
                     expirer.expire(s);
                 }
             }
@@ -180,11 +193,13 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         SessionImpl s = sessionsById.get(sessionId);
 
         if (s == null) {
+            // session为空
             logTraceTouchInvalidSession(sessionId, timeout);
             return false;
         }
 
         if (s.isClosing()) {
+            // session关闭了
             logTraceTouchClosingSession(sessionId, timeout);
             return false;
         }
@@ -195,6 +210,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
 
     private void updateSessionExpiry(SessionImpl s, int timeout) {
         logTraceTouchSession(s.sessionId, timeout, "");
+        // 更新过期时间
         sessionExpiryQueue.update(s, timeout);
     }
 
@@ -231,6 +247,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         if (s == null) {
             return;
         }
+        // 修改会话桶的状态
         s.isClosing = true;
     }
 
@@ -259,7 +276,9 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     }
 
     public long createSession(int sessionTimeout) {
+        // server为本次会话生成新的sessionId
         long sessionId = nextSessionId.getAndIncrement();
+        // 获取或创建session，并将其放入到会话桶
         trackSession(sessionId, sessionTimeout);
         return sessionId;
     }
@@ -268,6 +287,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     public synchronized boolean trackSession(long id, int sessionTimeout) {
         boolean added = false;
 
+        // 从缓存map中获取当前指定id的session，若为null，则创建一个session
         SessionImpl session = sessionsById.get(id);
         if (session == null) {
             session = new SessionImpl(id, sessionTimeout);
@@ -293,6 +313,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
                 + " session 0x" + Long.toHexString(id) + " " + sessionTimeout);
         }
 
+        // 更新session过期时间（放入相应的桶里）
         updateSessionExpiry(session, sessionTimeout);
         return added;
     }

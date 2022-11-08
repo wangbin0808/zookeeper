@@ -136,6 +136,7 @@ public class RequestThrottler extends ZooKeeperCriticalThread {
         dropStaleRequests = drop;
     }
 
+    // 一直工作
     @Override
     public void run() {
         try {
@@ -144,6 +145,7 @@ public class RequestThrottler extends ZooKeeperCriticalThread {
                     break;
                 }
 
+                // 从队列中获取一个请求
                 Request request = submittedRequests.take();
                 if (Request.requestOfDeath == request) {
                     break;
@@ -185,6 +187,7 @@ public class RequestThrottler extends ZooKeeperCriticalThread {
                       request.setIsThrottled(true);
                       ServerMetrics.getMetrics().THROTTLED_OPS.add(1);
                     }
+                    // 将请求提交给server来处理
                     zks.submitRequestNow(request);
                 }
             }
@@ -244,7 +247,9 @@ public class RequestThrottler extends ZooKeeperCriticalThread {
             LOG.debug("Shutdown in progress. Request cannot be processed");
             dropRequest(request);
         } else {
+            //
             request.requestThrottleQueueTime = Time.currentElapsedTime();
+            // 将请求写入到"已提交的请求"队列
             submittedRequests.add(request);
         }
     }

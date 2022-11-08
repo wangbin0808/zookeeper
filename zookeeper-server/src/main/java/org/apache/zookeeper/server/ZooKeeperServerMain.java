@@ -59,6 +59,7 @@ public class ZooKeeperServerMain {
 
     /*
      * Start up the ZooKeeper server.
+     * zookeeper 的启动入口
      *
      * @param args the configfile or the port datadir [ticktime]
      */
