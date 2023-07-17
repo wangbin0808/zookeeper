@@ -739,7 +739,12 @@ public class FastLeaderElection implements Election {
     /**
      * Check if a pair (server id, zxid) succeeds our
      * current vote.
+     * totalOrderPredicate 比较谁能胜出
      *
+     *  胜出的三个条件
+     *  1.选举届号大的 胜出
+     *  2.事务id：zxid大的胜出
+     *  3.myid 大的胜出
      */
     protected boolean totalOrderPredicate(long newId, long newZxid, long newEpoch, long curId, long curZxid, long curEpoch) {
         LOG.debug(

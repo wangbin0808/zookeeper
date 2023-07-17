@@ -468,6 +468,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                     }
                     rsp = new GetACLResponse(acl1, stat);
                 }
+
                 break;
             }
             case OpCode.getChildren: {
