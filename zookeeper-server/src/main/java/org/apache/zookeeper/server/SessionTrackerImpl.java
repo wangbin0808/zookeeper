@@ -222,6 +222,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
                 Long.toHexString(sessionId),
                 Integer.toString(timeout));
 
+
             ZooTrace.logTraceMessage(LOG, ZooTrace.CLIENT_PING_TRACE_MASK, msg);
         }
     }
